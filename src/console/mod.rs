@@ -1,43 +1,39 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 use crate::coordination::coordinator::Coordinator;
-use crate::models::thread_command::ThreadCommand;
-use crate::protocol::paxos::Paxos;
-use crate::services::thread_manager::ThreadManager;
+use crate::coordination::messages::SendMessage;
+use crate::protocol::paxos::{Paxos, PaxosCommand};
+use std::io;
 use std::io::Error;
 use std::process::exit;
 use std::sync::nonpoison::Mutex;
 use std::sync::Arc;
-use std::{io, thread};
 
 pub fn run() -> Result<(), Error> {
-  let thread_manager = Arc::new(Mutex::new(ThreadManager::new()));
-  let mut coordinator = Coordinator::new(Paxos);
+  let mut coordinator = Arc::new(Mutex::new(Coordinator::new(Paxos)));
 
   loop {
-    let thread_manager = thread_manager.clone();
+    let coordinator = coordinator.clone();
     let mut input = String::new();
     match io::stdin().read_line(&mut input) {
       Ok(_) => match input.trim() {
-        s if s.starts_with("kill") => {
-          let s: Vec<&str> = s.split(" ").collect();
-          thread_manager.lock().send(ThreadCommand::KILL(
-            u64::from_ascii(s[1].as_bytes()).unwrap(),
-          ))
-        }
+        // s if s.starts_with("kill") => {
+        //   let s: Vec<&str> = s.split(" ").collect();
+        //   coordinator.lock().send(ThreadCommand::KILL(
+        //     u64::from_ascii(s[1].as_bytes()).unwrap(),
+        //   ))
+        // }
         "help" => {
           println!("use spawn for new thread")
         }
         "spawn" => {
           // thread_manager.lock().spawn();
-          coordinator.register()?;
+          coordinator.lock().register()?;
         }
-        "broadcast" => thread_manager.lock().send(ThreadCommand::BROADCAST(
-          Arc::new(ThreadCommand::DATA(
-            thread::current().id().as_u64().get(),
-            "Hey From".into(),
-          )),
-        )),
+        "broadcast" => coordinator.lock().send(SendMessage::Broadcast {
+          sender_id: 0,
+          data: PaxosCommand::Data { s: "Hello!".into() },
+        }),
         "exit" => {
           exit(0);
         }

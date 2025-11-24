@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0+
 
-use crate::coordination::messages::Message;
+use crate::coordination::messages::{ReplyMessage, SendMessage};
 use crate::protocol::Protocol;
 use std::collections::{HashMap, VecDeque};
 use std::io::Error;
@@ -12,14 +12,14 @@ use std::thread::Thread;
 pub struct Coordinator<T, P>
 where
   P: Protocol<T> + Send + Sync + 'static,
-  T: Send + Sync + 'static,
+  T: Send + Sync + 'static + Clone,
 {
   protocol: P,
   pool: Arc<RwLock<HashMap<u64, Thread>>>,
-  execution_queue: Arc<RwLock<HashMap<u64, VecDeque<Message<T>>>>>,
+  execution_queue: Arc<RwLock<HashMap<u64, VecDeque<SendMessage<T>>>>>,
 }
 
-impl<T: Send + Sync + 'static, P: Protocol<T> + Send + Sync + 'static>
+impl<T: Send + Sync + 'static + Clone, P: Protocol<T> + Send + Sync + 'static>
   Coordinator<T, P>
 {
   pub fn new(protocol: P) -> Self {
@@ -37,22 +37,17 @@ impl<T: Send + Sync + 'static, P: Protocol<T> + Send + Sync + 'static>
     let worker = thread::Builder::new().spawn(move || {
       loop {
         let thread_id = thread::current().id().as_u64().get();
-        let mut lock = execution_queue.write();
-        let events = lock.entry(thread_id).or_default();
-
+        let mut guard = execution_queue.write();
+        let mut events = guard.remove(&thread_id).unwrap_or_default();
         while !events.is_empty() {
           let event = events.pop_front().expect("Deque must not be empty");
           let reply = protocol.act(event);
           match reply {
-            Message::Oneshot {
-              sender_id,
-              receiver_id,
-              data,
-            } => {
-              lock
+            ReplyMessage::Oneshot { receiver_id, data } => {
+              guard
                 .get_mut(&receiver_id)
                 .expect("Deque must not be empty")
-                .push_back(Message::Oneshot {
+                .push_back(SendMessage::Oneshot {
                   sender_id: thread_id,
                   receiver_id,
                   data,
@@ -63,12 +58,27 @@ impl<T: Send + Sync + 'static, P: Protocol<T> + Send + Sync + 'static>
                 .expect("Receiver must exist.")
                 .unpark();
             }
-            Message::None => {}
-            Message::Broadcast { sender_id, data } => {}
+            ReplyMessage::None => {}
+            ReplyMessage::Broadcast { data } => {
+              guard.iter_mut().filter(|(id, _)| thread_id != **id).for_each(
+                move |(id, deque)| {
+                  deque.push_back(SendMessage::Oneshot {
+                    sender_id: thread_id,
+                    receiver_id: id.clone(),
+                    data: data.clone(),
+                  });
+                },
+              );
+
+              pool.write().iter().for_each(|(_, thread)| {
+                thread.unpark();
+              })
+            }
           }
         }
 
-        drop(lock);
+        guard.insert(thread_id, events);
+        drop(guard);
         thread::park();
       }
     })?;
@@ -79,5 +89,50 @@ impl<T: Send + Sync + 'static, P: Protocol<T> + Send + Sync + 'static>
       .insert(worker.thread().id().as_u64().get(), worker.thread().clone());
 
     Ok(())
+  }
+
+  pub fn send(&mut self, message: SendMessage<T>) {
+    match message {
+      SendMessage::None => {}
+      SendMessage::Broadcast { sender_id, data } => {
+        let thread_id = thread::current().id().as_u64().get();
+        let mut guard = self.execution_queue.write();
+        guard.iter_mut().filter(|(id, _)| thread_id != **id).for_each(
+          move |(id, deque)| {
+            deque.push_back(SendMessage::Oneshot {
+              sender_id: thread_id,
+              receiver_id: id.clone(),
+              data: data.clone(),
+            });
+          },
+        );
+
+        self.pool.write().iter().for_each(|(_, thread)| {
+          thread.unpark();
+        })
+      }
+      SendMessage::Oneshot {
+        sender_id,
+        receiver_id,
+        data,
+      } => {
+        let thread_id = thread::current().id().as_u64().get();
+        let mut guard = self.execution_queue.write();
+        guard
+          .get_mut(&receiver_id)
+          .expect("Deque must not be empty")
+          .push_back(SendMessage::Oneshot {
+            sender_id: thread_id,
+            receiver_id,
+            data,
+          });
+        self
+          .pool
+          .write()
+          .get(&receiver_id)
+          .expect("Receiver must exist.")
+          .unpark();
+      }
+    }
   }
 }

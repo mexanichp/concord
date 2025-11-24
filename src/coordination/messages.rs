@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0+
 
-pub enum Message<T> {
+pub enum SendMessage<T> {
   None,
   Broadcast {
     sender_id: u64,
@@ -11,4 +11,10 @@ pub enum Message<T> {
     receiver_id: u64,
     data: T,
   },
+}
+
+pub enum ReplyMessage<T: Clone> {
+  None,
+  Oneshot { receiver_id: u64, data: T },
+  Broadcast { data: T },
 }

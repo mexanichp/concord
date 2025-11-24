@@ -8,9 +8,7 @@
 
 mod console;
 mod coordination;
-mod models;
 mod protocol;
-mod services;
 
 use std::io::Error;
 
