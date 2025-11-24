@@ -1,0 +1,40 @@
+[package]
+name = "concord"
+version = "0.1.0"
+rust-version = "1.89"
+authors = ["Mykhailo Konovalov https://mykkon.work"]
+
+description = "Consensus protocols playground"
+edition = "2024"
+license = "GPL-3.0+"
+repository = "https://github.com/mexanichp/concord"
+readme = "README.md"
+
+keywords = ["consensus", "gpl", "cli"]
+categories = ["algorithms", "command-line-utilities", "simulation"]
+
+exclude = [
+    "./github/*",
+    ".gitignore",
+    "tests/*",
+    "assets/*"
+]
+
+[dependencies]
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "warn"
