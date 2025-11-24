@@ -1,0 +1,31 @@
+name: main
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        BUILD_TARGET: [ release ]
+    
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup override set nightly
+      - name: Build binaries in "${{ matrix.BUILD_TARGET }}" mode
+        run: cargo build --profile ${{ matrix.BUILD_TARGET }}
+      - name: Run tests in  ${{ matrix.BUILD_TARGET }} mode
+        run: cargo test --profile  ${{ matrix.BUILD_TARGET }}

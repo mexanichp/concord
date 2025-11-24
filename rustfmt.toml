@@ -1,0 +1,10 @@
+# rustfmt.toml
+
+hard_tabs = false
+tab_spaces = 2
+
+max_width = 80
+
+reorder_imports = true
+
+chain_width = 80
