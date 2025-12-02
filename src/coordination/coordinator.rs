@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0+
 
-use crate::coordination::messages::{ReplyMessage, SendMessage};
+use crate::coordination::messages::CoordinatorMessage;
 use crate::protocol::Protocol;
 use std::collections::{HashMap, VecDeque};
 use std::io::Error;
+use std::marker::PhantomData;
 use std::sync::nonpoison::RwLock;
 use std::sync::Arc;
 use std::thread;
@@ -14,71 +15,39 @@ where
   P: Protocol<T> + Send + Sync + 'static,
   T: Send + Sync + 'static + Clone,
 {
-  protocol: P,
   pool: Arc<RwLock<HashMap<u64, Thread>>>,
-  execution_queue: Arc<RwLock<HashMap<u64, VecDeque<SendMessage<T>>>>>,
+  execution_queue: Arc<RwLock<HashMap<u64, VecDeque<CoordinatorMessage<T>>>>>,
+  _p: PhantomData<P>,
 }
 
 impl<T: Send + Sync + 'static + Clone, P: Protocol<T> + Send + Sync + 'static>
   Coordinator<T, P>
 {
-  pub fn new(protocol: P) -> Self {
+  pub fn new() -> Self {
     Self {
-      protocol,
       pool: Arc::new(RwLock::new(HashMap::new())),
       execution_queue: Arc::new(RwLock::new(HashMap::new())),
+      _p: Default::default(),
     }
   }
 
   pub fn register(&mut self) -> Result<(), Error> {
-    let protocol = self.protocol.clone();
-    let execution_queue = self.execution_queue.clone();
+    let protocol = P::new();
+    let execution_queue_mutex = self.execution_queue.clone();
     let pool = self.pool.clone();
     let worker = thread::Builder::new().spawn(move || {
       loop {
         let thread_id = thread::current().id().as_u64().get();
-        let mut guard = execution_queue.write();
-        let mut events = guard.remove(&thread_id).unwrap_or_default();
+        let mut execution_lock = execution_queue_mutex.write();
+        let mut events = execution_lock.remove(&thread_id).unwrap_or_default();
         while !events.is_empty() {
           let event = events.pop_front().expect("Deque must not be empty");
           let reply = protocol.act(event);
-          match reply {
-            ReplyMessage::Oneshot { receiver_id, data } => {
-              guard
-                .get_mut(&receiver_id)
-                .expect("Deque must not be empty")
-                .push_back(SendMessage::Oneshot {
-                  sender_id: thread_id,
-                  receiver_id,
-                  data,
-                });
-              pool
-                .write()
-                .get(&receiver_id)
-                .expect("Receiver must exist.")
-                .unpark();
-            }
-            ReplyMessage::None => {}
-            ReplyMessage::Broadcast { data } => {
-              guard.iter_mut().filter(|(id, _)| thread_id != **id).for_each(
-                move |(id, deque)| {
-                  deque.push_back(SendMessage::Oneshot {
-                    sender_id: thread_id,
-                    receiver_id: id.clone(),
-                    data: data.clone(),
-                  });
-                },
-              );
-
-              pool.write().iter().for_each(|(_, thread)| {
-                thread.unpark();
-              })
-            }
-          }
+          let pool = pool.read();
+          Self::process(reply, &mut execution_lock, &pool);
         }
-
-        guard.insert(thread_id, events);
-        drop(guard);
+        execution_lock.insert(thread_id, events);
+        drop(execution_lock);
         thread::park();
       }
     })?;
@@ -91,48 +60,61 @@ impl<T: Send + Sync + 'static + Clone, P: Protocol<T> + Send + Sync + 'static>
     Ok(())
   }
 
-  pub fn send(&mut self, message: SendMessage<T>) {
-    match message {
-      SendMessage::None => {}
-      SendMessage::Broadcast { sender_id, data } => {
-        let thread_id = thread::current().id().as_u64().get();
-        let mut guard = self.execution_queue.write();
-        guard.iter_mut().filter(|(id, _)| thread_id != **id).for_each(
-          move |(id, deque)| {
-            deque.push_back(SendMessage::Oneshot {
-              sender_id: thread_id,
-              receiver_id: id.clone(),
-              data: data.clone(),
-            });
-          },
-        );
+  pub fn send(&mut self, message: CoordinatorMessage<T>) {
+    Self::process(
+      message,
+      &mut self.execution_queue.write(),
+      &self.pool.read(),
+    );
+  }
 
-        self.pool.write().iter().for_each(|(_, thread)| {
-          thread.unpark();
-        })
-      }
-      SendMessage::Oneshot {
-        sender_id,
+  fn process(
+    message: CoordinatorMessage<T>,
+    execution_queue: &mut HashMap<u64, VecDeque<CoordinatorMessage<T>>>,
+    pool: &HashMap<u64, Thread>,
+  ) {
+    let thread_id = thread::current().id().as_u64().get();
+
+    match &message {
+      CoordinatorMessage::None => {}
+      CoordinatorMessage::Oneshot {
+        sender_id: _,
         receiver_id,
-        data,
+        data: _,
       } => {
-        let thread_id = thread::current().id().as_u64().get();
-        let mut guard = self.execution_queue.write();
-        guard
-          .get_mut(&receiver_id)
+        execution_queue
+          .get_mut(receiver_id)
           .expect("Deque must not be empty")
-          .push_back(SendMessage::Oneshot {
-            sender_id: thread_id,
-            receiver_id,
-            data,
-          });
-        self
-          .pool
-          .write()
-          .get(&receiver_id)
-          .expect("Receiver must exist.")
-          .unpark();
+          .push_back(message.clone());
+
+        pool.get(receiver_id).expect("Receiver must exist.").unpark();
+      }
+      CoordinatorMessage::Broadcast { sender_id: _, data } => {
+        Self::broadcast(data.clone(), thread_id, execution_queue);
+        Self::notify_all(pool);
       }
     }
+  }
+
+  fn notify_all(pool: &HashMap<u64, Thread>) {
+    pool.iter().for_each(|(_, thread)| {
+      thread.unpark();
+    })
+  }
+
+  fn broadcast(
+    data: T,
+    current_thread_id: u64,
+    guard: &mut HashMap<u64, VecDeque<CoordinatorMessage<T>>>,
+  ) {
+    guard.iter_mut().filter(|(id, _)| current_thread_id != **id).for_each(
+      move |(&id, deque)| {
+        deque.push_back(CoordinatorMessage::Oneshot {
+          sender_id: current_thread_id,
+          receiver_id: id,
+          data: data.clone(),
+        });
+      },
+    );
   }
 }
