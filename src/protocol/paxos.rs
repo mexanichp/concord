@@ -1,45 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0+
 
-use crate::coordination::messages::{ReplyMessage, SendMessage};
+use crate::coordination::messages::CoordinatorMessage;
+use crate::protocol::paxos::PaxosRole::Proposer;
 use crate::protocol::Protocol;
 use std::thread;
 
-#[derive(Clone)]
-pub struct Paxos;
+pub struct Paxos {
+  role: PaxosRole,
+  logical_clock: u64,
+  last_proposal: u64,
+  acceptors_count: u64,
+  value: Option<String>,
+}
 
 #[derive(Clone, Debug)]
 pub enum PaxosCommand {
-  Data { s: String },
+  Prepare { proposal: u64 },
+  AckPrepare { proposal: u64 },
+  Accept { proposal: u64, data: String },
+  AckAccept { proposal: u64, data: String },
+  Learn { proposal: u64, data: String },
 }
 
-pub enum PaxosReply {
-  Continue { receiver: u64, data: String },
-  Broadcast { data: String },
-  Finish,
+pub enum PaxosRole {
+  Proposer,
+  Acceptor,
+  Learner,
 }
 
 impl Protocol<PaxosCommand> for Paxos {
+  fn new() -> Self {
+    Self {
+      role: Proposer,
+      logical_clock: 0,
+      last_proposal: 0,
+      acceptors_count: 0,
+      value: None,
+    }
+  }
+
   fn act(
     &self,
-    command: SendMessage<PaxosCommand>,
-  ) -> ReplyMessage<PaxosCommand> {
+    command: CoordinatorMessage<PaxosCommand>,
+  ) -> CoordinatorMessage<PaxosCommand> {
     match command {
-      SendMessage::None => ReplyMessage::None,
-      SendMessage::Broadcast { sender_id, data } => {
-        println!("Sender {sender_id:?} sends {data:?}");
-        ReplyMessage::None
+      CoordinatorMessage::None => CoordinatorMessage::None,
+      CoordinatorMessage::Broadcast { sender_id, data } => {
+        Self::log(&sender_id, &data);
+
+        CoordinatorMessage::None
       }
-      SendMessage::Oneshot {
+      CoordinatorMessage::Oneshot {
         sender_id,
-        receiver_id,
+        receiver_id: _,
         data,
       } => {
-        println!(
-          "Sender {sender_id:?} sends {data:?} to {:?}",
-          thread::current().id()
-        );
-        ReplyMessage::None
+        Self::log(&sender_id, &data);
+
+        CoordinatorMessage::None
       }
     }
+  }
+}
+
+impl Paxos {
+  fn log(sender_id: &u64, data: &PaxosCommand) {
+    println!(
+      "Sender {sender_id:?} sent {data:?} to {:?}",
+      thread::current().id()
+    );
   }
 }
