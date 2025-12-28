@@ -5,6 +5,7 @@
 #![feature(thread_id_value)]
 #![feature(int_from_ascii)]
 #![feature(nonpoison_mutex)]
+#![feature(fn_traits)]
 
 mod console;
 mod coordination;

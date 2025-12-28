@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
+pub mod parser;
+
 use crate::coordination::coordinator::Coordinator;
 use crate::coordination::messages::CoordinatorMessage;
 use crate::protocol::paxos::{Paxos, PaxosCommand};
