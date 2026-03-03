@@ -83,6 +83,7 @@ impl Link for FairLossLink {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 fn test() {
   let fll = FairLossLink::new();
   fll.start();

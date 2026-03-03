@@ -72,6 +72,7 @@ impl Link for StubbornLink {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 fn test() {
   let sl = StubbornLink::new();
   sl.start();
