@@ -1,4 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 mod fll;
-pub mod sl;
+mod sl;
