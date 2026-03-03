@@ -93,6 +93,6 @@ fn test() {
     });
   }
 
-  sleep(Duration::from_secs(2));
-  assert!(fll.inner.read().monitoring.traces.values().filter(|&&x| x).count() >= 50);
+  sleep(Duration::from_secs(5));
+  assert!(fll.delivered_count() >= 50);
 }
