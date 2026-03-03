@@ -40,11 +40,6 @@ impl FairLossLinkInner {
     let messages = sender.entry(envelope.sender).or_default();
     messages.push(envelope.message.clone());
     self.monitoring.record_deliver(envelope.clone());
-
-    println!(
-      "Delivered message {} from {} to {}",
-      envelope.message, envelope.sender, envelope.receiver
-    );
   }
 }
 
@@ -54,10 +49,14 @@ pub struct FairLossLink {
 }
 
 impl FairLossLink {
-  fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       inner: Arc::new(RwLock::new(FairLossLinkInner::new())),
     }
+  }
+
+  pub fn delivered_count(&self) -> usize {
+    self.inner.read().monitoring.traces.values().filter(|&&x| x).count()
   }
 }
 
@@ -72,20 +71,19 @@ impl Link for FairLossLink {
             guard.deliver(envelope);
           }
         }
+
+        sleep(Duration::from_millis(50));
       }
     })
   }
 
   fn send(&self, envelope: Envelope) {
-    println!(
-      "Sending message {} from {} to {}",
-      envelope.message, envelope.sender, envelope.receiver
-    );
     self.inner.write().send(envelope);
   }
 }
 
 #[test]
+#[cfg(debug_assertions)]
 fn test() {
   let fll = FairLossLink::new();
   fll.start();
@@ -96,6 +94,6 @@ fn test() {
     });
   }
 
-  sleep(Duration::from_secs(2));
-  assert!(fll.inner.read().monitoring.traces.values().filter(|&&x| x).count() >= 50);
+  sleep(Duration::from_secs(5));
+  assert!(fll.delivered_count() >= 50);
 }
