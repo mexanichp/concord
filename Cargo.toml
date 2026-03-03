@@ -21,6 +21,7 @@ exclude = [
 ]
 
 [dependencies]
+rand = "0.10.0"
 
 [profile.dev]
 opt-level = 0

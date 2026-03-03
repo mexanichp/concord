@@ -9,6 +9,7 @@
 
 mod console;
 mod coordination;
+mod links;
 mod protocol;
 
 use std::io::Error;
