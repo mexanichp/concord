@@ -2,9 +2,10 @@
 
 use crate::links::envelope::Envelope;
 use crate::links::monitoring::Monitoring;
-use crate::links::Link;
+use crate::links::{Event, Link};
 use rand::RngExt;
 use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::nonpoison::RwLock;
 use std::sync::Arc;
 use std::thread;
@@ -15,14 +16,16 @@ struct FairLossLinkInner {
   participants: HashMap<usize, HashMap<usize, Vec<String>>>, // participant[] -> sender[] -> inbox[]
   queue: VecDeque<Envelope>,
   monitoring: Monitoring,
+  sender: Sender<Event>,
 }
 
 impl FairLossLinkInner {
-  fn new() -> Self {
+  fn new(sender: Sender<Event>) -> Self {
     Self {
       participants: Default::default(),
       queue: Default::default(),
       monitoring: Default::default(),
+      sender,
     }
   }
 
@@ -40,6 +43,7 @@ impl FairLossLinkInner {
     let messages = sender.entry(envelope.sender).or_default();
     messages.push(envelope.message.clone());
     self.monitoring.record_deliver(envelope.clone());
+    self.sender.send(Event::Delivered(envelope.clone())).unwrap();
   }
 }
 
@@ -49,10 +53,14 @@ pub struct FairLossLink {
 }
 
 impl FairLossLink {
-  pub fn new() -> Self {
-    Self {
-      inner: Arc::new(RwLock::new(FairLossLinkInner::new())),
-    }
+  pub fn new() -> (Self, Receiver<Event>) {
+    let (tx, rx) = channel();
+    (
+      Self {
+        inner: Arc::new(RwLock::new(FairLossLinkInner::new(tx))),
+      },
+      rx,
+    )
   }
 
   pub fn delivered_count(&self) -> usize {
@@ -85,7 +93,7 @@ impl Link for FairLossLink {
 #[test]
 #[cfg(debug_assertions)]
 fn test() {
-  let fll = FairLossLink::new();
+  let (fll, rx) = FairLossLink::new();
   fll.start();
   for i in 1..=100 {
     let fll = fll.clone();
