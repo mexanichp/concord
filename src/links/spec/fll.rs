@@ -4,7 +4,7 @@ use crate::links::envelope::Envelope;
 use crate::links::monitoring::Monitoring;
 use crate::links::{Event, Link};
 use rand::RngExt;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::nonpoison::RwLock;
 use std::sync::Arc;
@@ -13,7 +13,6 @@ use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
 
 struct FairLossLinkInner {
-  participants: HashMap<usize, HashMap<usize, Vec<String>>>, // participant[] -> sender[] -> inbox[]
   queue: VecDeque<Envelope>,
   monitoring: Monitoring,
   sender: Sender<Event>,
@@ -22,7 +21,6 @@ struct FairLossLinkInner {
 impl FairLossLinkInner {
   fn new(sender: Sender<Event>) -> Self {
     Self {
-      participants: Default::default(),
       queue: Default::default(),
       monitoring: Default::default(),
       sender,
@@ -39,9 +37,6 @@ impl FairLossLinkInner {
       return;
     }
 
-    let sender = self.participants.entry(envelope.receiver).or_default();
-    let messages = sender.entry(envelope.sender).or_default();
-    messages.push(envelope.message.clone());
     self.monitoring.record_deliver(envelope.clone());
     self.sender.send(Event::Delivered(envelope.clone())).unwrap();
   }

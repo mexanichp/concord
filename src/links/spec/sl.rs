@@ -32,14 +32,7 @@ impl StubbornLinkInner {
   }
 
   fn deliver(&self, envelope: Envelope) {
-    match self.sender.send(Event::Delivered(envelope.clone())) {
-      Ok(_) => {
-        println!("Sent {envelope:?}")
-      }
-      Err(err) => {
-        println!("Error {:?}", err.0)
-      }
-    };
+    self.sender.send(Event::Delivered(envelope.clone())).unwrap();
   }
 }
 

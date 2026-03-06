@@ -62,11 +62,11 @@ impl Link for PerfectLink {
           match event {
             Event::Delivered(envelope) => {
               if inner.read().delivered.contains(&envelope) {
-                return;
+                continue;
               }
               let mut lock = inner.write();
               if lock.delivered.contains(&envelope) {
-                return;
+                continue;
               }
               lock.delivered.insert(envelope.clone());
               lock.sender.send(Event::Delivered(envelope)).unwrap();
@@ -103,6 +103,7 @@ fn test() {
   let pl = PerfectLink::new(tx);
   pl.start();
 
+  pl.send(Envelope::new(0, 1, "Hello #1!".to_string()));
   pl.send(Envelope::new(0, 1, "Hello #1!".to_string()));
   pl.send(Envelope::new(0, 2, "Hello #2!".to_string()));
 
