@@ -2,10 +2,11 @@
 
 use crate::links::envelope::Envelope;
 use crate::links::spec::fll::FairLossLink;
-use crate::links::Link;
+use crate::links::{Event, Link};
 use std::collections::VecDeque;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::nonpoison::RwLock;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -13,26 +14,47 @@ use std::time::Duration;
 struct StubbornLinkInner {
   fll: FairLossLink,
   retransmit: VecDeque<Envelope>,
+  sender: Sender<Event>,
 }
 
 impl StubbornLinkInner {
-  fn new() -> Self {
-    Self {
-      fll: FairLossLink::new(),
-      retransmit: VecDeque::new(),
-    }
+  fn new(sender: Sender<Event>) -> (Self, Receiver<Event>) {
+    let (tx, rx) = channel();
+    let fll = FairLossLink::new(tx);
+    (
+      Self {
+        fll,
+        retransmit: VecDeque::new(),
+        sender,
+      },
+      rx,
+    )
+  }
+
+  fn deliver(&self, envelope: Envelope) {
+    match self.sender.send(Event::Delivered(envelope.clone())) {
+      Ok(_) => {
+        println!("Sent {envelope:?}")
+      }
+      Err(err) => {
+        println!("Error {:?}", err.0)
+      }
+    };
   }
 }
 
 #[derive(Clone)]
 pub struct StubbornLink {
   inner: Arc<RwLock<StubbornLinkInner>>,
+  callback: Arc<Mutex<Option<Receiver<Event>>>>,
 }
 
 impl StubbornLink {
-  pub fn new() -> Self {
+  pub fn new(sender: Sender<Event>) -> Self {
+    let (sl, rx) = StubbornLinkInner::new(sender);
     Self {
-      inner: Arc::new(RwLock::new(StubbornLinkInner::new())),
+      inner: Arc::new(RwLock::new(sl)),
+      callback: Arc::new(Mutex::new(Some(rx))),
     }
   }
 
@@ -45,7 +67,19 @@ impl Link for StubbornLink {
   fn start(&self) -> JoinHandle<()> {
     let inner = self.inner.clone();
     let t1 = inner.read().fll.start();
+    let receiver = self.callback.lock().unwrap().take().unwrap();
     let t2 = thread::spawn(move || {
+      let rec_inner = inner.clone();
+      thread::spawn(move || {
+        loop {
+          match receiver.recv() {
+            Ok(event) => match event {
+              Event::Delivered(envelope) => rec_inner.read().deliver(envelope),
+            },
+            Err(_) => {}
+          };
+        }
+      });
       loop {
         {
           let envelope = inner.write().retransmit.pop_front();
@@ -74,7 +108,8 @@ impl Link for StubbornLink {
 #[test]
 #[cfg(debug_assertions)]
 fn test() {
-  let sl = StubbornLink::new();
+  let (tx, rx) = channel();
+  let sl = StubbornLink::new(tx);
   sl.start();
   for i in 0..100 {
     let sl = sl.clone();

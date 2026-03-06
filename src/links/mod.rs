@@ -11,3 +11,8 @@ pub trait Link {
   fn start(&self) -> JoinHandle<()>;
   fn send(&self, envelope: Envelope);
 }
+
+#[derive(Debug)]
+pub enum Event {
+  Delivered(Envelope),
+}
