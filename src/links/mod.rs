@@ -12,6 +12,7 @@ pub trait Link {
   fn send(&self, envelope: Envelope);
 }
 
+#[derive(Debug)]
 pub enum Event {
   Delivered(Envelope),
 }

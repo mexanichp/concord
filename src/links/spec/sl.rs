@@ -19,41 +19,43 @@ struct StubbornLinkInner {
 
 impl StubbornLinkInner {
   fn new(sender: Sender<Event>) -> (Self, Receiver<Event>) {
-    let (fll, fll_rx) = FairLossLink::new();
+    let (tx, rx) = channel();
+    let fll = FairLossLink::new(tx);
     (
       Self {
         fll,
         retransmit: VecDeque::new(),
         sender,
       },
-      fll_rx,
+      rx,
     )
   }
 
   fn deliver(&self, envelope: Envelope) {
-    self.sender.send(Event::Delivered(envelope)).unwrap();
+    match self.sender.send(Event::Delivered(envelope.clone())) {
+      Ok(_) => {
+        println!("Sent {envelope:?}")
+      }
+      Err(err) => {
+        println!("Error {:?}", err.0)
+      }
+    };
   }
 }
 
 #[derive(Clone)]
 pub struct StubbornLink {
   inner: Arc<RwLock<StubbornLinkInner>>,
-  sender: Sender<Event>,
   callback: Arc<Mutex<Option<Receiver<Event>>>>,
 }
 
 impl StubbornLink {
-  pub fn new(sender: Sender<Event>) -> (Self, Receiver<Event>) {
-    let (tx, rx) = channel();
-    let (sl, sl_rx) = StubbornLinkInner::new(tx);
-    (
-      Self {
-        inner: Arc::new(RwLock::new(sl)),
-        sender,
-        callback: Arc::new(Mutex::new(Some(sl_rx))),
-      },
-      rx,
-    )
+  pub fn new(sender: Sender<Event>) -> Self {
+    let (sl, rx) = StubbornLinkInner::new(sender);
+    Self {
+      inner: Arc::new(RwLock::new(sl)),
+      callback: Arc::new(Mutex::new(Some(rx))),
+    }
   }
 
   pub fn delivered_count(&self) -> usize {
@@ -107,7 +109,7 @@ impl Link for StubbornLink {
 #[cfg(debug_assertions)]
 fn test() {
   let (tx, rx) = channel();
-  let (sl, _) = StubbornLink::new(tx);
+  let sl = StubbornLink::new(tx);
   sl.start();
   for i in 0..100 {
     let sl = sl.clone();

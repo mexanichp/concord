@@ -5,7 +5,7 @@ use crate::links::monitoring::Monitoring;
 use crate::links::{Event, Link};
 use rand::RngExt;
 use std::collections::{HashMap, VecDeque};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::nonpoison::RwLock;
 use std::sync::Arc;
 use std::thread;
@@ -53,14 +53,10 @@ pub struct FairLossLink {
 }
 
 impl FairLossLink {
-  pub fn new() -> (Self, Receiver<Event>) {
-    let (tx, rx) = channel();
-    (
-      Self {
-        inner: Arc::new(RwLock::new(FairLossLinkInner::new(tx))),
-      },
-      rx,
-    )
+  pub fn new(sender: Sender<Event>) -> Self {
+    Self {
+      inner: Arc::new(RwLock::new(FairLossLinkInner::new(sender))),
+    }
   }
 
   pub fn delivered_count(&self) -> usize {
@@ -93,7 +89,8 @@ impl Link for FairLossLink {
 #[test]
 #[cfg(debug_assertions)]
 fn test() {
-  let (fll, rx) = FairLossLink::new();
+  let (tx, rx) = channel();
+  let fll = FairLossLink::new(tx);
   fll.start();
   for i in 1..=100 {
     let fll = fll.clone();
