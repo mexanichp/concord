@@ -4,11 +4,12 @@ use crate::links::envelope::Envelope;
 use crate::links::spec::sl::StubbornLink;
 use crate::links::{Event, Link};
 use std::collections::HashSet;
+use std::io::Read;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::nonpoison::RwLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::thread::JoinHandle;
+use std::thread::{sleep, JoinHandle};
 use std::time::Duration;
 
 struct PerfectLinkInner {
@@ -86,26 +87,65 @@ impl Link for PerfectLink {
     self.inner.read().sl.send(envelope);
   }
 }
-
+/// **Abstract:**
+/// The result of the execution clearly shows the problem of concurrency and causality.
+///
+/// While sender sends all the events sequentially, the replies (as well as the receiving participant)
+/// may receive the messages out of order.
+///
+/// **Guarantees:**
+/// Exactly once delivery through retries and idempotency.
+///
+/// **Example:**
+/// ```
+/// Messenger started
+/// Delivered exactly once Envelope { sender: 2, receiver: 1, message: "Echo Participant 1 sends message 0" }
+/// Delivered exactly once Envelope { sender: 2, receiver: 1, message: "Echo Participant 1 sends message 2" }
+/// Delivered exactly once Envelope { sender: 2, receiver: 1, message: "Echo Participant 1 sends message 3" }
+/// Delivered exactly once Envelope { sender: 2, receiver: 1, message: "Echo Participant 1 sends message 1" }
+/// Delivered exactly once Envelope { sender: 2, receiver: 1, message: "Echo Participant 1 sends message 4" }
+/// ```
 #[test]
 #[cfg(debug_assertions)]
 fn test() {
   let (tx, rx) = channel();
   thread::spawn(move || {
+    let (tx, receiver) = channel();
+    thread::spawn(move || {
+      loop {
+        if let Ok(event) = receiver.recv() {
+          match event {
+            Event::Delivered(envelope) => {
+              println!("Delivered exactly once {:?}", envelope);
+            }
+          }
+        }
+      }
+    });
+    let participant2 = PerfectLink::new(tx);
+    participant2.start();
     loop {
       if let Ok(event) = rx.recv() {
-        println!("Delivered exactly once {event:?}")
-      } else {
-        println!("Error occurred")
+        match event {
+          Event::Delivered(envelope) => participant2.send(Envelope::new(
+            envelope.receiver,
+            envelope.sender,
+            format!("Echo {}", envelope.message),
+          )),
+        }
       }
     }
   });
-  let pl = PerfectLink::new(tx);
-  pl.start();
 
-  pl.send(Envelope::new(0, 1, "Hello #1!".to_string()));
-  pl.send(Envelope::new(0, 1, "Hello #1!".to_string()));
-  pl.send(Envelope::new(0, 2, "Hello #2!".to_string()));
+  let participant1 = PerfectLink::new(tx);
+  participant1.start();
+  thread::spawn(move || {
+    println!("Messenger started");
+    for i in 0..5 {
+      let message = format!("Participant 1 sends message {i}");
+      participant1.send(Envelope::new(1, 2, message));
+    }
+  });
 
-  thread::sleep(Duration::from_secs(5));
+  sleep(Duration::from_secs(5));
 }
