@@ -107,7 +107,7 @@ impl Link for PerfectLink {
 /// ```
 #[test]
 #[cfg(debug_assertions)]
-pub fn testpl() {
+fn test() {
   let (tx, rx) = channel();
   thread::spawn(move || {
     let (tx, receiver) = channel();
