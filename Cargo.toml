@@ -22,6 +22,8 @@ exclude = [
 
 [dependencies]
 rand = "0.10.0"
+serde = { version = "1", features = ["derive", "default"] }
+serde_json = { version = "1", features = ["default", "std"] }
 
 [profile.dev]
 opt-level = 0
