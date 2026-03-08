@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Envelope {
   pub sender: usize,
   pub receiver: usize,
