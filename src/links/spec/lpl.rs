@@ -124,6 +124,7 @@ impl Link for LoggedPerfectLink {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 fn test() {
   let (tx, rx) = channel();
 
